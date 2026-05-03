@@ -1,0 +1,180 @@
+#include <iostream>
+#include <string>
+using namespace std;
+
+struct Point {
+    long long x, y;
+    bool infinity;
+};
+
+/* -------- Math Utilities -------- */
+long long mod(long long a, long long p) {
+    return (a % p + p) % p;
+}
+
+long long modInverse(long long a, long long p) {
+    a = mod(a, p);
+    for (long long i = 1; i < p; i++)
+        if (mod(a * i, p) == 1)
+            return i;
+    return -1;
+}
+
+Point infinityPoint() {
+    return {0, 0, true};
+}
+
+bool isOnCurve(Point P, long long a, long long b, long long p) {
+    if (P.infinity) return true;
+    return mod(P.y * P.y, p) == mod(P.x * P.x * P.x + a * P.x + b, p);
+}
+
+/* -------- Point Operations -------- */
+Point pointAdd(Point P, Point Q, long long a, long long p) {
+    if (P.infinity) return Q;
+    if (Q.infinity) return P;
+
+    if (P.x == Q.x && mod(P.y + Q.y, p) == 0)
+        return infinityPoint();
+
+    long long lambda;
+    if (P.x == Q.x && P.y == Q.y) {
+        long long num = mod(3 * P.x * P.x + a, p);
+        long long den = modInverse(2 * P.y, p);
+        lambda = mod(num * den, p);
+    } else {
+        long long num = mod(Q.y - P.y, p);
+        long long den = modInverse(Q.x - P.x, p);
+        lambda = mod(num * den, p);
+    }
+
+    long long xr = mod(lambda * lambda - P.x - Q.x, p);
+    long long yr = mod(lambda * (P.x - xr) - P.y, p);
+
+    return {xr, yr, false};
+}
+
+Point pointSubtract(Point P, Point Q, long long a, long long p) {
+    if (Q.infinity) return P;
+    Point negQ = {Q.x, mod(-Q.y, p), false};
+    return pointAdd(P, negQ, a, p);
+}
+
+Point scalarMultiply(Point P, long long k, long long a, long long p) {
+    Point result = infinityPoint();
+    while (k > 0) {
+        if (k & 1)
+            result = pointAdd(result, P, a, p);
+        P = pointAdd(P, P, a, p);
+        k >>= 1;
+    }
+    return result;
+}
+
+/* -------- Curve Analysis -------- */
+long long computeOrder(Point G, long long a, long long p) {
+    Point temp = G;
+    long long n = 1;
+    while (!temp.infinity) {
+        temp = pointAdd(temp, G, a, p);
+        n++;
+    }
+    return n;
+}
+
+void displayAllAffinePoints(long long a, long long b, long long p) {
+    cout << "\n=== All Affine Points on the Curve ===\n";
+    int count = 0;
+    for (long long x = 0; x < p; x++) {
+        long long y_squared = mod(x * x * x + a * x + b, p);
+        for (long long y = 0; y < p; y++) {
+            if (mod(y * y, p) == y_squared) {
+                cout << "(" << x << ", " << y << ")\n";
+                count++;
+            }
+        }
+    }
+    cout << "Point at Infinity\n";
+    cout << "Total Affine Points: " << count + 1 << endl;
+}
+
+/* -------- Main Execution -------- */
+int main() {
+    long long a, b, p;
+    cout << "Enter curve parameters (a b p): ";
+    cin >> a >> b >> p;
+
+    if (mod(4 * a * a * a + 27 * b * b, p) == 0) {
+        cout << "Invalid curve (singular)!\n";
+        return 0;
+    }
+
+    displayAllAffinePoints(a, b, p);
+
+    Point G;
+    while (true) {
+        cout << "\nEnter Generator Point (Gx Gy): ";
+        cin >> G.x >> G.y;
+        G.infinity = false;
+        if (isOnCurve(G, a, b, p)) break;
+        cout << "Point is NOT on curve. Try again.\n";
+    }
+
+    long long n = computeOrder(G, a, p);
+    cout << "Order of Generator (n) = " << n << endl;
+
+    long long alpha, beta;
+    cout << "\nEnter Alice private key (alpha): "; cin >> alpha;
+    cout << "Enter Bob private key (beta): "; cin >> beta;
+
+    // 1. Feature: Public Key Generation
+    Point PA = scalarMultiply(G, alpha, a, p);
+    Point PB = scalarMultiply(G, beta, a, p);
+
+    cout << "\nAlice Public Key: (" << PA.x << "," << PA.y << ")";
+    cout << "\nBob Public Key: (" << PB.x << "," << PB.y << ")\n";
+
+    // 2. Feature: ECDH Key Exchange 
+    cout << "\n--- Feature 1: ECDH Key Exchange ---";
+    Point sharedA = scalarMultiply(PB, alpha, a, p);
+    Point sharedB = scalarMultiply(PA, beta, a, p);
+
+    cout << "\nShared Secret (Alice): (" << sharedA.x << "," << sharedA.y << ")";
+    cout << "\nShared Secret (Bob):   (" << sharedB.x << "," << sharedB.y << ")";
+
+    if (sharedA.x == sharedB.x && sharedA.y == sharedB.y)
+        cout << "\nKey Exchange Successful!\n";
+
+    // 3. Feature: ECC Encryption/Decryption 
+    cout << "\n--- Feature 2: ECC Encryption (Alice to Bob) ---";
+    Point Pm;
+    cout << "\nEnter Plaintext Point Pm (x y) to encrypt: ";
+    cin >> Pm.x >> Pm.y;
+    Pm.infinity = false;
+
+    if (!isOnCurve(Pm, a, b, p)) {
+        cout << "Error: Point is not on curve!\n";
+        return 0;
+    }
+
+    // Encryption: Cm = { alpha*G, Pm + alpha*PB }
+    Point C1 = scalarMultiply(G, alpha, a, p); 
+    Point secretComponent = scalarMultiply(PB, alpha, a, p);
+    Point C2 = pointAdd(Pm, secretComponent, a, p);
+
+    cout << "Ciphertext sent: {C1:(" << C1.x << "," << C1.y << "), C2:(" << C2.x << "," << C2.y << ")}\n";
+
+    cout << "\n--- Feature 3: ECC Decryption (Bob receives) ---";
+    // Decryption: Pm = C2 - beta*C1
+    Point subtrahend = scalarMultiply(C1, beta, a, p);
+    Point recoveredPm = pointSubtract(C2, subtrahend, a, p);
+
+    cout << "\nDecrypted Point Pm: (" << recoveredPm.x << "," << recoveredPm.y << ")";
+
+    if (recoveredPm.x == Pm.x && recoveredPm.y == Pm.y)
+        cout << "\nMessage recovery successful!\n";
+    else
+        cout << "\nMessage recovery failed.\n";
+
+    return 0;
+}
